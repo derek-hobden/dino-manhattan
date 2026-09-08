@@ -86,6 +86,10 @@ function circleHitsAabb(x: number, z: number, radius: number, box: Aabb): boolea
   return dx * dx + dz * dz < radius * radius;
 }
 
+function lerpAngle(from: number, to: number, t: number): number {
+  return from + Math.atan2(Math.sin(to - from), Math.cos(to - from)) * t;
+}
+
 async function boot() {
   const loader = new GLTFLoader();
   const [dinoGltf, cityGltf, collision] = await Promise.all([
@@ -126,6 +130,7 @@ async function boot() {
   });
 
   const radius = 0.7;
+  const up = new THREE.Vector3(0, 1, 0);
   const look = new THREE.Vector3();
   const camDesired = new THREE.Vector3();
   const camRight = new THREE.Vector3();
@@ -133,6 +138,7 @@ async function boot() {
   const move = new THREE.Vector3();
   const clock = new THREE.Clock();
   let facing = 0;
+  let camYaw = 0;
 
   function blocked(x: number, z: number): boolean {
     if (x < bounds.min[0] + radius || x > bounds.max[0] - radius || z < bounds.min[1] + radius || z > bounds.max[1] - radius) {
@@ -152,10 +158,11 @@ async function boot() {
     const sprint = keys.has("ShiftLeft") || keys.has("ShiftRight");
     const speed = sprint ? 10.5 : 6.2;
 
-    camera.getWorldDirection(camForward);
-    camForward.y = 0;
+    // Planar heading from camera -> dino (stable WASD, not a flipped right-vector).
+    camForward.set(dino.position.x - camera.position.x, 0, dino.position.z - camera.position.z);
+    if (camForward.lengthSq() < 1e-6) camForward.set(0, 0, 1);
     camForward.normalize();
-    camRight.crossVectors(camForward, new THREE.Vector3(0, 1, 0)).normalize();
+    camRight.crossVectors(up, camForward).normalize();
 
     move.set(0, 0, 0);
     if (keys.has("KeyW") || keys.has("ArrowUp")) move.add(camForward);
@@ -173,21 +180,22 @@ async function boot() {
       facing = Math.atan2(move.x, move.z);
     }
 
-    dino.rotation.y = THREE.MathUtils.damp(dino.rotation.y, facing, 10, dt);
     for (const walk of walks) {
       walk.paused = !walking;
       walk.timeScale = sprint ? 1.45 : 1;
     }
     mixer.update(dt);
+    dino.rotation.y = lerpAngle(dino.rotation.y, facing, 1 - Math.exp(-12 * dt));
 
     const back = 8.4;
     const height = 4.4;
+    camYaw = lerpAngle(camYaw, facing, 1 - Math.exp(-3.4 * dt));
     camDesired.set(
-      dino.position.x - Math.sin(dino.rotation.y) * back,
+      dino.position.x - Math.sin(camYaw) * back,
       dino.position.y + height,
-      dino.position.z - Math.cos(dino.rotation.y) * back,
+      dino.position.z - Math.cos(camYaw) * back,
     );
-    camera.position.lerp(camDesired, 1 - Math.exp(-4.2 * dt));
+    camera.position.lerp(camDesired, 1 - Math.exp(-6 * dt));
     look.set(dino.position.x, dino.position.y + 1.35, dino.position.z);
     camera.lookAt(look);
 
