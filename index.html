@@ -8,9 +8,20 @@
   <body>
     <div id="hud">
       <h1>DINO WALKS MANHATTAN</h1>
-      <p>WASD or arrows to stroll the block · Shift to hustle</p>
+      <p>Click to lock mouse · WASD move · A/D strafe · Shift sprint · LMB shoot</p>
+      <div id="bars">
+        <div class="bar">
+          <span>YOU</span>
+          <div class="track"><i id="hp-player"></i></div>
+        </div>
+        <div class="bar">
+          <span>ENEMY</span>
+          <div class="track enemy"><i id="hp-enemy"></i></div>
+        </div>
+      </div>
     </div>
-    <div id="hint">Stay on the street. Don’t eat the brownstones.</div>
+    <div id="hint">Click the street to capture the mouse. Esc releases.</div>
+    <div id="banner" hidden></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
