@@ -20,12 +20,10 @@ Static output lands in `dist/` (Vercel-ready; no backend).
 ## Controls
 
 - **Click canvas:** pointer-lock mouse look (Esc releases).
-- **Mouse:** yaw/pitch the third-person camera. Keyboard never aims the camera.
-- **W / S:** walk forward / back along the camera’s flat facing.
-- **A / D:** **strafe** left / right along the camera’s flat right. They do **not** turn the dino.
-- **Shift:** sprint. **LMB** (while locked): shoot from the gun.
-
-While W/S are held, the dino’s nose follows the travel direction (including diagonals with strafe). Pure A/D keeps the current facing. Standing still and shooting faces camera-forward.
+- **Mouse:** yaw/pitch the third-person camera. The dino’s yaw **always** matches the camera’s flat forward (look left → dino turns left).
+- **W / S:** walk along camera flat forward / back.
+- **A / D:** **strafe** along camera flat right / left. They never yaw the dino; yaw comes only from the mouse/camera.
+- **Shift:** sprint. **LMB** (while locked): hitscan shot along that same camera-forward.
 
 ## Combat
 

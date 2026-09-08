@@ -72,6 +72,45 @@ function lerpAngle(from: number, to: number, t: number): number {
   return from + Math.atan2(Math.sin(to - from), Math.cos(to - from)) * t;
 }
 
+function rayHitsAabb3(
+  ox: number,
+  oy: number,
+  oz: number,
+  dx: number,
+  dy: number,
+  dz: number,
+  min: [number, number, number],
+  max: [number, number, number],
+  maxDist: number,
+): number | null {
+  let t0 = 0;
+  let t1 = maxDist;
+  const origin = [ox, oy, oz];
+  const dir = [dx, dy, dz];
+  for (let i = 0; i < 3; i++) {
+    if (Math.abs(dir[i]) < 1e-8) {
+      if (origin[i] < min[i] || origin[i] > max[i]) return null;
+      continue;
+    }
+    let tmin = (min[i] - origin[i]) / dir[i];
+    let tmax = (max[i] - origin[i]) / dir[i];
+    if (tmin > tmax) [tmin, tmax] = [tmax, tmin];
+    t0 = Math.max(t0, tmin);
+    t1 = Math.min(t1, tmax);
+    if (t0 > t1) return null;
+  }
+  return t0 >= 0 ? t0 : t1 >= 0 ? t1 : null;
+}
+
+function bodyVolume(obj: THREE.Object3D): { min: [number, number, number]; max: [number, number, number] } {
+  const x = obj.position.x;
+  const z = obj.position.z;
+  return {
+    min: [x - 1.25, 0, z - 1.25],
+    max: [x + 1.25, 2.5, z + 1.25],
+  };
+}
+
 function findNamed(root: THREE.Object3D, suffix: string): THREE.Object3D | null {
   let found: THREE.Object3D | null = null;
   root.traverse((child) => {
@@ -128,12 +167,7 @@ function enableShadows(root: THREE.Object3D) {
   });
 }
 
-type Bolt = {
-  mesh: THREE.Mesh;
-  vel: THREE.Vector3;
-  life: number;
-  from: "player" | "enemy";
-};
+type Tracer = { mesh: THREE.Line; life: number };
 
 async function boot() {
   const loader = new GLTFLoader();
@@ -189,14 +223,13 @@ async function boot() {
 
   let camYaw = 0;
   let camPitch = 0.32;
-  let facing = 0;
   let locked = false;
-  let shooting = false;
   let playerHp = PLAYER_MAX;
   let enemyHp = ENEMY_MAX;
   let ended: "win" | "lose" | null = null;
   let enemyCooldown = 0.6;
-  const bolts: Bolt[] = [];
+  const tracers: Tracer[] = [];
+  const hitFlashes: { mesh: THREE.Mesh; life: number }[] = [];
 
   const hpPlayer = document.querySelector("#hp-player") as HTMLElement;
   const hpEnemy = document.querySelector("#hp-enemy") as HTMLElement;
@@ -251,20 +284,114 @@ async function boot() {
     hint.textContent = kind === "win" ? "The rust dino is down." : "Click restart.";
   }
 
-  function spawnBolt(from: THREE.Object3D | null, fallback: THREE.Object3D, dir: THREE.Vector3, team: "player" | "enemy") {
-    const origin = from ? from.getWorldPosition(muzzleWorld) : fallback.position.clone().setY(1.4);
+  function flashHit(at: THREE.Vector3, color: number) {
     const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(0.08, 8, 8),
-      new THREE.MeshBasicMaterial({ color: team === "player" ? 0xffe566 : 0xff5533 }),
+      new THREE.SphereGeometry(0.42, 10, 10),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95 }),
     );
-    mesh.position.copy(origin);
+    mesh.position.copy(at);
     scene.add(mesh);
-    const flash = new THREE.PointLight(team === "player" ? 0xffe566 : 0xff5533, 4, 6);
-    flash.position.copy(origin);
-    scene.add(flash);
-    window.setTimeout(() => scene.remove(flash), 60);
-    const vel = dir.clone().normalize().multiplyScalar(team === "player" ? 38 : 28);
-    bolts.push({ mesh, vel, life: 1.15, from: team });
+    hitFlashes.push({ mesh, life: 0.28 });
+    const light = new THREE.PointLight(color, 6, 8);
+    light.position.copy(at);
+    scene.add(light);
+    window.setTimeout(() => scene.remove(light), 80);
+  }
+
+  function drawTracer(from: THREE.Vector3, to: THREE.Vector3, color: number) {
+    const geo = new THREE.BufferGeometry().setFromPoints([from.clone(), to.clone()]);
+    const mesh = new THREE.Line(geo, new THREE.LineBasicMaterial({ color, linewidth: 2 }));
+    scene.add(mesh);
+    tracers.push({ mesh, life: 0.12 });
+  }
+
+  function hitscan(origin: THREE.Vector3, dir: THREE.Vector3, team: "player" | "enemy") {
+    const range = 70;
+    const nd = dir.clone().normalize();
+    let best = range;
+    let hitActor: "player" | "enemy" | null = null;
+    let hitPoint = origin.clone().addScaledVector(nd, range);
+
+    if (team === "player" && enemyHp > 0 && enemy.visible) {
+      const vol = bodyVolume(enemy);
+      const t = rayHitsAabb3(origin.x, origin.y, origin.z, nd.x, nd.y, nd.z, vol.min, vol.max, range);
+      if (t !== null && t < best) {
+        best = t;
+        hitActor = "enemy";
+        hitPoint.copy(origin).addScaledVector(nd, t);
+      }
+    }
+    if (team === "enemy" && playerHp > 0) {
+      const vol = bodyVolume(player);
+      const t = rayHitsAabb3(origin.x, origin.y, origin.z, nd.x, nd.y, nd.z, vol.min, vol.max, range);
+      if (t !== null && t < best) {
+        best = t;
+        hitActor = "player";
+        hitPoint.copy(origin).addScaledVector(nd, t);
+      }
+    }
+    for (const box of buildings) {
+      const t = rayHitsAabb3(
+        origin.x,
+        origin.y,
+        origin.z,
+        nd.x,
+        nd.y,
+        nd.z,
+        [box.min[0], 0, box.min[1]],
+        [box.max[0], 28, box.max[1]],
+        range,
+      );
+      if (t !== null && t < best) {
+        best = t;
+        hitActor = null;
+        hitPoint.copy(origin).addScaledVector(nd, t);
+      }
+    }
+
+    drawTracer(origin, hitPoint, team === "player" ? 0xffe566 : 0xff5533);
+    flashHit(origin, team === "player" ? 0xffe566 : 0xff7744);
+
+    if (hitActor === "enemy") {
+      enemyHp -= 20;
+      flashHit(hitPoint, 0xffffff);
+      hint.textContent = `HIT + enemy HP ${Math.max(0, enemyHp)}/${ENEMY_MAX}`;
+      if (enemyHp <= 0) {
+        enemy.visible = false;
+        refreshBars();
+        showEnd("win");
+      }
+    } else if (hitActor === "player") {
+      playerHp -= 14;
+      flashHit(hitPoint, 0xff8866);
+      hint.textContent = `YOU WERE HIT · HP ${Math.max(0, playerHp)}/${PLAYER_MAX}`;
+      if (playerHp <= 0) {
+        refreshBars();
+        showEnd("lose");
+      }
+    }
+    refreshBars();
+  }
+
+  function firePlayer() {
+    if (ended) return;
+    aimDir.set(Math.sin(camYaw), 0.05, Math.cos(camYaw));
+    const origin = player.position.clone();
+    origin.y = 1.35;
+    origin.addScaledVector(aimDir, 0.55);
+    if (playerMuzzle) flashHit(playerMuzzle.getWorldPosition(muzzleWorld), 0xffe566);
+    hitscan(origin, aimDir, "player");
+  }
+
+  function fireEnemy() {
+    if (ended || enemyHp <= 0) return;
+    const origin = enemy.position.clone();
+    origin.y = 1.35;
+    aimDir.set(player.position.x - enemy.position.x, 0.05, player.position.z - enemy.position.z);
+    if (aimDir.lengthSq() < 1e-6) return;
+    origin.addScaledVector(aimDir.clone().normalize(), 0.55);
+    if (enemyMuzzle) flashHit(enemyMuzzle.getWorldPosition(muzzleWorld), 0xff5533);
+    hitscan(origin, aimDir, "enemy");
   }
 
   renderer.domElement.addEventListener("click", () => {
@@ -273,16 +400,17 @@ async function boot() {
       renderer.domElement.requestPointerLock();
       return;
     }
-    shooting = true;
-    const lookYaw = camYaw;
-    aimDir.set(Math.sin(lookYaw), 0.02, Math.cos(lookYaw));
-    spawnBolt(playerMuzzle, player, aimDir, "player");
+    firePlayer();
   });
+  (window as unknown as { __fire: () => void; __look: (yaw: number) => void }).__fire = firePlayer;
+  (window as unknown as { __fire: () => void; __look: (yaw: number) => void }).__look = (yaw: number) => {
+    camYaw = yaw;
+  };
 
   document.addEventListener("pointerlockchange", () => {
     locked = document.pointerLockElement === renderer.domElement;
     hint.textContent = locked
-      ? "W/S walk · A/D strafe (no turn) · mouse look · LMB shoot"
+      ? "Mouse turns you · W/S along look · A/D strafe · LMB hitscan"
       : "Click the street to capture the mouse. Esc releases.";
   });
 
@@ -319,16 +447,13 @@ async function boot() {
       const nextZ = player.position.z + move.z * speed * dt;
       if (!blocked(nextX, player.position.z, player)) player.position.x = nextX;
       if (!blocked(player.position.x, nextZ, player)) player.position.z = nextZ;
-      // A/D alone never yaws. Only a W/S component updates facing.
-      if (fwd !== 0) facing = Math.atan2(move.x, move.z);
-    } else if (shooting && !ended) {
-      facing = camYaw;
     }
 
     playerAnim.mixer.update(dt);
     enemyAnim.mixer.update(dt);
     setAnim(playerAnim, walking, sprint);
-    player.rotation.y = lerpAngle(player.rotation.y, facing, 1 - Math.exp(-14 * dt));
+    // Yaw is camera-tied only. A/D never rotate the dino.
+    player.rotation.y = lerpAngle(player.rotation.y, camYaw, 1 - Math.exp(-16 * dt));
 
     if (!ended && enemyHp > 0) {
       const toPlayer = new THREE.Vector3().subVectors(player.position, enemy.position);
@@ -351,44 +476,32 @@ async function boot() {
       enemyCooldown -= dt;
       if (canSee && enemyCooldown <= 0) {
         enemyCooldown = 0.85;
-        aimDir.set(Math.sin(enemy.rotation.y), 0.02, Math.cos(enemy.rotation.y));
-        spawnBolt(enemyMuzzle, enemy, aimDir, "enemy");
+        fireEnemy();
       }
     } else {
       setAnim(enemyAnim, false);
     }
 
-    for (let i = bolts.length - 1; i >= 0; i--) {
-      const bolt = bolts[i];
-      bolt.mesh.position.addScaledVector(bolt.vel, dt);
-      bolt.life -= dt;
-      const p = bolt.mesh.position;
-      const hitBuilding = buildings.some((box) => circleHitsAabb(p.x, p.z, 0.12, box));
-      let consumed = bolt.life <= 0 || hitBuilding;
-      if (!consumed && bolt.from === "player" && enemyHp > 0 && p.distanceTo(enemy.position) < 1.15) {
-        enemyHp -= 20;
-        consumed = true;
-        if (enemyHp <= 0) {
-          enemy.visible = false;
-          refreshBars();
-          showEnd("win");
-        }
+    for (let i = tracers.length - 1; i >= 0; i--) {
+      tracers[i].life -= dt;
+      if (tracers[i].life <= 0) {
+        scene.remove(tracers[i].mesh);
+        tracers[i].mesh.geometry.dispose();
+        tracers.splice(i, 1);
       }
-      if (!consumed && bolt.from === "enemy" && playerHp > 0 && p.distanceTo(player.position) < 1.15) {
-        playerHp -= 14;
-        consumed = true;
-        if (playerHp <= 0) {
-          refreshBars();
-          showEnd("lose");
-        }
-      }
-      if (consumed) {
-        scene.remove(bolt.mesh);
-        bolts.splice(i, 1);
+    }
+    for (let i = hitFlashes.length - 1; i >= 0; i--) {
+      hitFlashes[i].life -= dt;
+      const mat = hitFlashes[i].mesh.material as THREE.MeshBasicMaterial;
+      mat.opacity = Math.max(0, hitFlashes[i].life / 0.28);
+      hitFlashes[i].mesh.scale.setScalar(1 + (0.28 - hitFlashes[i].life) * 4);
+      if (hitFlashes[i].life <= 0) {
+        scene.remove(hitFlashes[i].mesh);
+        hitFlashes[i].mesh.geometry.dispose();
+        hitFlashes.splice(i, 1);
       }
     }
     refreshBars();
-    shooting = false;
 
     const dist = 8.6;
     const planar = Math.cos(camPitch) * dist;
@@ -401,9 +514,12 @@ async function boot() {
     look.set(player.position.x, player.position.y + 1.35, player.position.z);
     camera.lookAt(look);
 
-    document.documentElement.dataset.facing = facing.toFixed(4);
+    document.documentElement.dataset.facing = camYaw.toFixed(4);
+    document.documentElement.dataset.yaw = player.rotation.y.toFixed(4);
     document.documentElement.dataset.px = player.position.x.toFixed(3);
     document.documentElement.dataset.pz = player.position.z.toFixed(3);
+    document.documentElement.dataset.enemyHp = String(enemyHp);
+    document.documentElement.dataset.playerHp = String(playerHp);
     renderer.render(scene, camera);
     requestAnimationFrame(tick);
   }
