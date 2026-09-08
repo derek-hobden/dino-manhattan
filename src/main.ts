@@ -118,12 +118,12 @@ async function boot() {
   scene.add(dino);
 
   const mixer = new THREE.AnimationMixer(dino);
-  const walkClip = dinoGltf.animations[0] ?? THREE.AnimationClip.findByName(dinoGltf.animations, "Walk");
-  const walk = walkClip ? mixer.clipAction(walkClip) : null;
-  if (walk) {
-    walk.play();
-    walk.paused = true;
-  }
+  const walks = dinoGltf.animations.map((clip) => {
+    const action = mixer.clipAction(clip);
+    action.play();
+    action.paused = true;
+    return action;
+  });
 
   const radius = 0.7;
   const look = new THREE.Vector3();
@@ -174,7 +174,7 @@ async function boot() {
     }
 
     dino.rotation.y = THREE.MathUtils.damp(dino.rotation.y, facing, 10, dt);
-    if (walk) {
+    for (const walk of walks) {
       walk.paused = !walking;
       walk.timeScale = sprint ? 1.45 : 1;
     }
