@@ -22,8 +22,8 @@ Static output lands in `dist/` (Vercel-ready; no backend).
 - **Click canvas:** pointer-lock mouse look (Esc releases).
 - **Mouse:** yaw/pitch the third-person camera. The dino’s yaw **always** matches the camera’s flat forward (look left → dino turns left).
 - **W / S:** walk along camera flat forward / back.
-- **A / D:** **strafe** along camera flat right / left. They never yaw the dino; yaw comes only from the mouse/camera.
-- **Shift:** sprint. **LMB** (while locked): hitscan shot along that same camera-forward.
+- **A / D:** **strafe** left / right on screen (A left, D right). They never yaw the dino; yaw comes only from the mouse/camera.
+- **Shift:** sprint. **LMB** (while locked): fire a visible bolt along camera-forward. Enemy shots are slow enough to sidestep.
 
 ## Combat
 
