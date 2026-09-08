@@ -104,11 +104,37 @@ def make_cylinder(
     return obj
 
 
-def empty(name: str, location: tuple[float, float, float]) -> bpy.types.Object:
+def empty(
+    name: str,
+    location: tuple[float, float, float],
+    parent: bpy.types.Object | None = None,
+) -> bpy.types.Object:
     obj = bpy.data.objects.new(name, None)
     bpy.context.collection.objects.link(obj)
     obj.empty_display_type = "PLAIN_AXES"
+    if parent:
+        obj.parent = parent
     obj.location = location
+    return obj
+
+
+def make_box_local(
+    name: str,
+    local: tuple[float, float, float],
+    size: tuple[float, float, float],
+    material: bpy.types.Material,
+    parent: bpy.types.Object,
+) -> bpy.types.Object:
+    bpy.ops.mesh.primitive_cube_add(size=1, location=(0.0, 0.0, 0.0))
+    obj = bpy.context.active_object
+    obj.name = name
+    obj.data.name = name
+    obj.scale = size
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    assign(obj, material)
+    obj.parent = parent
+    obj.location = local
+    obj.rotation_euler = (0.0, 0.0, 0.0)
     return obj
 
 
@@ -157,56 +183,47 @@ def build_dino() -> bpy.types.Object:
     eye = mat("dino_eye", (0.08, 0.08, 0.06), roughness=0.2)
     crest = mat("dino_crest", (0.55, 0.22, 0.14))
 
+    # All child locations are LOCAL so thigh/shin rotations pivot at the joints.
     root = empty("Dino", (0.0, 0.0, 0.0))
-    hips = empty("DinoHips", (0.0, 0.0, 1.15))
-    hips.parent = root
+    hips = empty("DinoHips", (0.0, 0.0, 1.15), root)
 
-    body = make_box("DinoBody", (0.0, 0.12, 1.28), (0.72, 1.15, 0.62), hide, hips)
-    make_box("DinoBelly", (0.0, 0.08, 1.05), (0.48, 0.9, 0.28), belly, hips)
+    body = make_box_local("DinoBody", (0.0, 0.12, 0.13), (0.72, 1.15, 0.62), hide, hips)
+    make_box_local("DinoBelly", (0.0, 0.08, -0.10), (0.48, 0.9, 0.28), belly, hips)
 
-    neck = empty("DinoNeck", (0.0, 0.72, 1.55))
-    neck.parent = hips
-    make_box("DinoNeckMesh", (0.0, 0.78, 1.58), (0.32, 0.38, 0.32), hide, neck)
+    neck = empty("DinoNeck", (0.0, 0.72, 0.40), hips)
+    make_box_local("DinoNeckMesh", (0.0, 0.06, 0.03), (0.32, 0.38, 0.32), hide, neck)
 
-    head = empty("DinoHead", (0.0, 1.12, 1.78))
-    head.parent = neck
-    make_box("DinoSkull", (0.0, 1.22, 1.82), (0.48, 0.55, 0.4), hide, head)
-    make_box("DinoSnout", (0.0, 1.62, 1.68), (0.34, 0.42, 0.24), hide, head)
-    make_box("DinoJaw", (0.0, 1.55, 1.5), (0.3, 0.38, 0.1), dark, head)
-    make_box("DinoTeeth", (0.0, 1.58, 1.56), (0.26, 0.34, 0.05), claw, head)
-    make_box("DinoCrest", (0.0, 1.08, 2.08), (0.08, 0.28, 0.18), crest, head)
-    make_box("DinoEyeL", (0.2, 1.38, 1.9), (0.08, 0.08, 0.08), eye, head)
-    make_box("DinoEyeR", (-0.2, 1.38, 1.9), (0.08, 0.08, 0.08), eye, head)
+    head = empty("DinoHead", (0.0, 0.40, 0.23), neck)
+    make_box_local("DinoSkull", (0.0, 0.10, 0.04), (0.48, 0.55, 0.4), hide, head)
+    make_box_local("DinoSnout", (0.0, 0.50, -0.10), (0.34, 0.42, 0.24), hide, head)
+    make_box_local("DinoJaw", (0.0, 0.43, -0.28), (0.3, 0.38, 0.1), dark, head)
+    make_box_local("DinoTeeth", (0.0, 0.46, -0.22), (0.26, 0.34, 0.05), claw, head)
+    make_box_local("DinoCrest", (0.0, -0.04, 0.30), (0.08, 0.28, 0.18), crest, head)
+    make_box_local("DinoEyeL", (0.2, 0.26, 0.12), (0.08, 0.08, 0.08), eye, head)
+    make_box_local("DinoEyeR", (-0.2, 0.26, 0.12), (0.08, 0.08, 0.08), eye, head)
 
-    tail_base = empty("DinoTailBase", (0.0, -0.55, 1.22))
-    tail_base.parent = hips
-    make_box("DinoTail1", (0.0, -0.72, 1.22), (0.38, 0.55, 0.34), hide, tail_base)
-    tail_mid = empty("DinoTailMid", (0.0, -1.15, 1.18))
-    tail_mid.parent = tail_base
-    make_box("DinoTail2", (0.0, -1.28, 1.16), (0.26, 0.5, 0.24), hide, tail_mid)
-    tail_tip = empty("DinoTailTip", (0.0, -1.7, 1.1))
-    tail_tip.parent = tail_mid
-    make_box("DinoTail3", (0.0, -1.82, 1.08), (0.14, 0.42, 0.14), dark, tail_tip)
+    tail_base = empty("DinoTailBase", (0.0, -0.55, 0.07), hips)
+    make_box_local("DinoTail1", (0.0, -0.17, 0.0), (0.38, 0.55, 0.34), hide, tail_base)
+    tail_mid = empty("DinoTailMid", (0.0, -0.60, -0.04), tail_base)
+    make_box_local("DinoTail2", (0.0, -0.13, -0.02), (0.26, 0.5, 0.24), hide, tail_mid)
+    tail_tip = empty("DinoTailTip", (0.0, -0.55, -0.08), tail_mid)
+    make_box_local("DinoTail3", (0.0, -0.12, -0.02), (0.14, 0.42, 0.14), dark, tail_tip)
 
     def limb(side: str, x: float) -> tuple[bpy.types.Object, bpy.types.Object]:
-        thigh = empty(f"DinoThigh{side}", (x, 0.05, 0.95))
-        thigh.parent = hips
-        make_box(f"DinoThighMesh{side}", (x, 0.08, 0.72), (0.26, 0.32, 0.55), hide, thigh)
-        shin = empty(f"DinoShin{side}", (x, 0.02, 0.42))
-        shin.parent = thigh
-        make_box(f"DinoShinMesh{side}", (x, -0.02, 0.26), (0.2, 0.24, 0.38), dark, shin)
-        make_box(f"DinoFoot{side}", (x, 0.14, 0.07), (0.22, 0.38, 0.1), claw, shin)
+        thigh = empty(f"DinoThigh{side}", (x, 0.05, -0.20), hips)
+        make_box_local(f"DinoThighMesh{side}", (0.0, 0.03, -0.23), (0.26, 0.32, 0.55), hide, thigh)
+        shin = empty(f"DinoShin{side}", (0.0, -0.03, -0.53), thigh)
+        make_box_local(f"DinoShinMesh{side}", (0.0, -0.04, -0.16), (0.2, 0.24, 0.38), dark, shin)
+        make_box_local(f"DinoFoot{side}", (0.0, 0.12, -0.35), (0.22, 0.38, 0.1), claw, shin)
         return thigh, shin
 
     thigh_l, shin_l = limb("L", 0.28)
     thigh_r, shin_r = limb("R", -0.28)
 
-    arm_l = empty("DinoArmL", (0.34, 0.55, 1.32))
-    arm_l.parent = hips
-    make_box("DinoArmMeshL", (0.38, 0.68, 1.18), (0.1, 0.28, 0.1), hide, arm_l)
-    arm_r = empty("DinoArmR", (-0.34, 0.55, 1.32))
-    arm_r.parent = hips
-    make_box("DinoArmMeshR", (-0.38, 0.68, 1.18), (0.1, 0.28, 0.1), hide, arm_r)
+    arm_l = empty("DinoArmL", (0.34, 0.55, 0.17), hips)
+    make_box_local("DinoArmMeshL", (0.04, 0.13, -0.14), (0.1, 0.28, 0.1), hide, arm_l)
+    arm_r = empty("DinoArmR", (-0.34, 0.55, 0.17), hips)
+    make_box_local("DinoArmMeshR", (-0.04, 0.13, -0.14), (0.1, 0.28, 0.1), hide, arm_r)
 
     frames = (1, 7, 13, 19, 24)
     stride = 0.55
@@ -478,7 +495,7 @@ def export_glb(path: Path, objects: list[bpy.types.Object], animations: bool) ->
         filepath=str(path),
         export_format="GLB",
         use_selection=True,
-        export_apply=True,
+        export_apply=False,
         export_yup=True,
     )
     # Blender 4/5 GLTF exporter flag names drifted; try the current then older ones.
